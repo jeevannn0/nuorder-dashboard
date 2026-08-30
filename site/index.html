@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>NuORDER Color Dashboard</title>
+    <meta
+      name="description"
+      content="Look up the customer facing color and color family for a raw vendor color."
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="wrap">
+      <h1>🎨 NuORDER Color Dashboard</h1>
+      <p class="lede">
+        Paste a raw color below to instantly generate the
+        <strong>Customer Facing Color</strong> and find its
+        <strong>Color Family</strong>.
+      </p>
+
+      <label class="field">
+        <span class="field-label">Paste Raw Vendor Color Here:</span>
+        <input
+          id="query"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          disabled
+          placeholder="Loading color database…"
+        />
+      </label>
+
+      <p id="status" class="status status-loading" role="status" aria-live="polite">
+        Loading color database…
+      </p>
+
+      <section id="results" hidden aria-live="polite">
+        <hr />
+        <h2>Results</h2>
+        <div class="grid">
+          <div class="card">
+            <h3>Customer Facing Color</h3>
+            <p id="facing" class="value"></p>
+          </div>
+          <div id="family-card" class="card">
+            <h3>Color Family</h3>
+            <p id="family" class="value"></p>
+            <p id="hint" class="hint" hidden>
+              To fix this, add the color to your Google Sheet.
+            </p>
+          </div>
+        </div>
+
+        <h2>Copy for NuORDER:</h2>
+        <div class="copy-row">
+          <input id="copy-text" type="text" readonly aria-label="Tab separated result" />
+          <button id="copy-btn" type="button">Copy</button>
+        </div>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
