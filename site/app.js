@@ -377,14 +377,16 @@ function render(opts = {}) {
   if (found) els.family.appendChild(swatchFor(family));
   els.family.appendChild(document.createTextNode(family));
 
-  // Paste line, with the tab rendered visibly but copied as a real tab.
+  // Paste line. The separator is a real tab character in the DOM so that
+  // selecting the line by hand and hitting ctrl+c yields the same thing the
+  // copy button produces. The visible marker is drawn by a CSS pseudo-element,
+  // which is not part of the text and therefore never lands in the clipboard.
   els.paste.textContent = "";
   els.paste.append(
     document.createTextNode(formatted),
     Object.assign(document.createElement("span"), {
       className: "tab-glyph",
-      textContent: "⇥",
-      ariaHidden: "true",
+      textContent: "\t",
     }),
     document.createTextNode(family)
   );
@@ -542,36 +544,72 @@ function resetBtn(btn, html) {
   btn.innerHTML = html;
 }
 
-async function copyText(text, btn, doneLabel) {
-  const before = btn.innerHTML;
-  try {
-    await navigator.clipboard.writeText(text);
-  } catch {
-    // Clipboard API needs a secure context; fall back to a hidden textarea.
-    const ta = document.createElement("textarea");
-    ta.value = text;
-    ta.setAttribute("readonly", "");
-    ta.style.position = "fixed";
-    ta.style.opacity = "0";
-    document.body.appendChild(ta);
-    ta.select();
+/**
+ * Write to the clipboard, returning whether it actually worked.
+ *
+ * The execCommand fallback deliberately builds its own textarea and selects it
+ * explicitly. An unfocused or unselected element makes execCommand fall back to
+ * the current document selection, which would silently copy whatever happens to
+ * be highlighted on the page instead of the value asked for.
+ */
+async function writeClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
     try {
-      document.execCommand("copy");
-    } finally {
-      ta.remove();
+      await navigator.clipboard.writeText(text);
+      return true;
+    } catch {
+      // Fall through to the legacy path below.
     }
   }
-  btn.classList.add("is-done");
-  btn.innerHTML = doneLabel;
-  setTimeout(() => resetBtn(btn, before), 1400);
+
+  const ta = document.createElement("textarea");
+  ta.value = text;
+  // Offscreen rather than invisible: an opacity-0 element is not reliably
+  // selectable, and a failed selection is what causes the wrong-content copy.
+  ta.style.position = "fixed";
+  ta.style.top = "0";
+  ta.style.left = "-9999px";
+  ta.style.width = "1px";
+  ta.style.height = "1px";
+  ta.setAttribute("aria-hidden", "true");
+  ta.setAttribute("tabindex", "-1");
+
+  const previous = document.activeElement;
+  document.body.appendChild(ta);
+
+  let ok = false;
+  try {
+    ta.focus({ preventScroll: true });
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    ok = document.execCommand("copy");
+  } catch {
+    ok = false;
+  } finally {
+    ta.remove();
+    if (previous && typeof previous.focus === "function") {
+      previous.focus({ preventScroll: true });
+    }
+  }
+  return ok;
+}
+
+async function copyText(text, btn, doneLabel) {
+  const before = btn.innerHTML;
+  const ok = await writeClipboard(text);
+  btn.classList.toggle("is-done", ok);
+  btn.classList.toggle("is-failed", !ok);
+  btn.innerHTML = ok ? doneLabel : "copy failed";
+  setTimeout(() => {
+    btn.classList.remove("is-failed");
+    resetBtn(btn, before);
+  }, ok ? 1400 : 2200);
 }
 
 function copyPasteLine() {
-  copyText(
-    `${els.facing.textContent}\t${els.family.textContent}`,
-    els.copyBtn,
-    "copied ✓"
-  );
+  // els.paste already holds the exact text, tab included, so the button and a
+  // manual selection cannot disagree.
+  copyText(els.paste.textContent, els.copyBtn, "copied ✓");
 }
 
 // --- keyboard ---------------------------------------------------------------

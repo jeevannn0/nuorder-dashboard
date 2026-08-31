@@ -397,9 +397,21 @@ kbd {
   color: var(--fg);
 }
 
+/* Holds a real tab character. The visible marker is a pseudo-element so it is
+   never included when the text is selected or copied. */
 .tab-glyph {
-  color: var(--dimmer);
-  padding: 0 0.1rem;
+  position: relative;
+  white-space: pre;
+}
+
+.tab-glyph::before {
+  content: "⇥";
+  position: absolute;
+  top: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  color: var(--dim);
+  pointer-events: none;
 }
 
 .btn {
@@ -710,4 +722,36 @@ kbd {
   .batch-table td.col-n {
     display: none;
   }
+}
+
+/* --- selection hygiene ---
+   Decorative chrome must never end up in the clipboard when someone drags a
+   selection across the output and hits ctrl+c. Only real values stay
+   selectable. */
+
+.term-bar,
+.tabs,
+.credit,
+.cmd-hint,
+.sigil,
+.flag,
+.prompt,
+kbd,
+.batch-table th,
+.batch-table td.col-n,
+.suggest-foot,
+.term-status {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.key {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.btn.is-failed {
+  color: var(--red);
+  border-color: var(--err-line, #7c3b3b);
+  background: #2a1518;
 }
