@@ -29,13 +29,6 @@ OUT = SITE / "data" / "colors.json"
 # request a new URL.
 STAMPED_ASSETS = ("styles.css", "app.js")
 
-SHEET_CSV_URL = (
-    "https://docs.google.com/spreadsheets/d/e/"
-    "2PACX-1vQLtwVng-2paE3JmYRfENRg3_ZEFvCxcZscbZu9fKSrlRkXeWLaZtM6S4G8i3c8wUhA7Xzc0gZJKmDA"
-    "/pub?gid=415337850&single=true&output=csv"
-)
-
-
 def extract_from_app_py(name):
     """Pull a module-level literal assignment out of app.py without importing it."""
     tree = ast.parse(APP_PY.read_text(encoding="utf-8"))
@@ -73,6 +66,13 @@ def stamp_assets():
 def main():
     translation = extract_from_app_py("translation_dict")
     url = extract_from_app_py("SHEET_CSV_URL")
+    if not isinstance(url, str) or not url.startswith("https://"):
+        raise SystemExit(
+            f"SHEET_CSV_URL in app.py is {url!r} - it must be the published "
+            "Google Sheet CSV link. Did an edit accidentally empty it?"
+        )
+    if not translation:
+        raise SystemExit("translation_dict in app.py is empty")
 
     print(f"fetching {url[:70]}...")
     with urllib.request.urlopen(url, timeout=120) as resp:

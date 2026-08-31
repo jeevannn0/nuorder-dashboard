@@ -60,11 +60,23 @@ const data = JSON.parse(fs.readFileSync(path.join(root, 'site', 'data', 'colors.
 global.document = { addEventListener() {} };
 const sandbox = { module: {}, exports: {} };
 const fn = new Function('document', 'navigator', 'setTimeout', src + `
-  ;return { getCustomerFacingColor, pyTitle, FAMILY_SWATCH,
+  ;return { getCustomerFacingColor, pyTitle, FAMILY_SWATCH, lookupFamily,
             setData: (d) => { DATA = d; } };
 `);
 const api = fn({ addEventListener() {} }, {}, () => {});
 api.setData(data);
+
+// Prototype-chain regression check: names inherited from Object.prototype must
+// not report phantom matches when they are not actually colors in the sheet.
+for (const probe of ['constructor', '__proto__', 'hasownproperty', 'tostring']) {
+  const inSheet = Object.hasOwn(data.colors, probe);
+  const r = api.lookupFamily(probe);
+  if (r.found !== inSheet || (r.found && typeof r.family !== 'string')) {
+    console.log('PROTO LEAK:', probe, JSON.stringify(r), 'inSheet=' + inSheet);
+    process.exit(1);
+  }
+}
+console.log('proto-leak probes: clean');
 
 // Every family the sheet produces must have a swatch defined in app.js.
 const missingSwatch = data.families.filter((f) => !(f in api.FAMILY_SWATCH));

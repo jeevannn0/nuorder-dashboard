@@ -72,9 +72,14 @@ function getCustomerFacingColor(colorName) {
 
 function lookupFamily(rawQuery) {
   const key = rawQuery.trim().toLowerCase();
-  const idx = DATA.colors[key];
-  if (idx === undefined) return { found: false, family: NOT_FOUND };
-  return { found: true, family: DATA.families[idx] };
+  // hasOwn, not a bare property read: querying "constructor" or "__proto__"
+  // would otherwise hit Object.prototype and report a phantom match with an
+  // undefined family. DATA.colors is also re-keyed onto a null prototype at
+  // load, so this is belt and braces.
+  if (!Object.hasOwn(DATA.colors, key)) {
+    return { found: false, family: NOT_FOUND };
+  }
+  return { found: true, family: DATA.families[DATA.colors[key]] };
 }
 
 /**
@@ -158,7 +163,11 @@ async function refreshFromSheet() {
   try {
     const resp = await fetch(DATA.source, { cache: "no-store" });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const rows = parseCSV(await resp.text());
+    let text = await resp.text();
+    // A UTF-8 BOM would glue itself onto the first header cell and break the
+    // COLOR column detection.
+    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+    const rows = parseCSV(text);
     if (rows.length < 2) throw new Error("sheet looks empty");
 
     const header = rows[0].map((h) => h.trim());
@@ -202,14 +211,21 @@ async function refreshFromSheet() {
       btn.innerHTML = before;
     }, 1800);
 
-    // Re-run whatever is on screen against the new index.
-    if (els.input.value) render();
+    // Re-run whatever is on screen against the new index. suggest:false so a
+    // background refresh does not pop the completion menu open under the
+    // user's cursor.
+    if (els.input.value) render({ suggest: false });
     if (batchResults.length) runBatch();
   } catch (err) {
     btn.disabled = false;
     btn.innerHTML = before;
+    // Show the failure, then restore the status line: the old index is still
+    // loaded and working, so a permanent error banner would be misleading.
     els.boot.className = "c-red";
-    els.boot.textContent = `refresh failed: ${err.message}`;
+    els.boot.textContent = `refresh failed: ${err.message} — still using the loaded index`;
+    setTimeout(() => {
+      if (lastGoodStatus) setBootStatus(...lastGoodStatus);
+    }, 5000);
   }
 }
 
@@ -226,7 +242,10 @@ function swatchFor(family) {
   return span;
 }
 
+let lastGoodStatus = null;
+
 function setBootStatus(count, familyCount, ms, tag) {
+  lastGoodStatus = [count, familyCount, ms, tag];
   els.boot.className = "";
   els.boot.textContent = "";
   els.boot.append(
@@ -288,19 +307,21 @@ function renderSuggestions(rawQuery) {
 
     // Suggestions render uppercase. The lookup is case-insensitive and
     // title-cases its output, so display casing cannot change the result.
-    const shown = key.toUpperCase();
+    // Slice the key first and uppercase each piece independently: uppercasing
+    // can change string length (ß -> SS), so slicing an uppercased whole by
+    // key indices could misalign the highlight.
     const at = key.indexOf(q);
     const name = document.createElement("span");
     name.className = "s-name";
     if (at === -1) {
-      name.textContent = shown;
+      name.textContent = key.toUpperCase();
     } else {
       name.append(
-        document.createTextNode(shown.slice(0, at)),
+        document.createTextNode(key.slice(0, at).toUpperCase()),
         Object.assign(document.createElement("b"), {
-          textContent: shown.slice(at, at + q.length),
+          textContent: key.slice(at, at + q.length).toUpperCase(),
         }),
-        document.createTextNode(shown.slice(at + q.length))
+        document.createTextNode(key.slice(at + q.length).toUpperCase())
       );
     }
     li.appendChild(name);
@@ -353,7 +374,11 @@ function closeSuggestions() {
 }
 
 function accept(key) {
-  els.input.value = key.toUpperCase();
+  // Show uppercase only when it round-trips back to the key. For characters
+  // like ß (uppercase SS) it would not, and the accepted suggestion would then
+  // fail its own lookup.
+  const upper = key.toUpperCase();
+  els.input.value = upper.toLowerCase() === key ? upper : key;
   closeSuggestions();
   render({ suggest: false });
   els.input.focus();
@@ -428,9 +453,14 @@ function render(opts = {}) {
 // --- batch ------------------------------------------------------------------
 
 function runBatch() {
+  // A multi-column Excel paste arrives as tab-separated lines; the color name
+  // is the first cell. This also keeps tabs out of `raw`, which would
+  // otherwise shift columns in the TSV exports below. (Two sheet rows do
+  // contain literal tabs in COLOR; those can still be matched in the single
+  // lookup tab, where input is taken verbatim.)
   const lines = els.batchInput.value
     .split(/\r?\n/)
-    .map((l) => l.trim())
+    .map((l) => l.split("\t")[0].trim())
     .filter((l) => l.length > 0);
 
   batchResults = lines.map((raw) => {
@@ -542,7 +572,8 @@ function downloadCSV() {
 // --- clipboard --------------------------------------------------------------
 
 function resetBtn(btn, html) {
-  btn.classList.remove("is-done");
+  btn.classList.remove("is-done", "is-failed");
+  clearTimeout(btnTimers.get(btn));
   btn.innerHTML = html;
 }
 
@@ -596,16 +627,29 @@ async function writeClipboard(text) {
   return ok;
 }
 
+// Per-button revert timers. Without cancelling the pending timer, a second
+// click inside the flash window captures "copied ✓" as the label to restore,
+// leaving the button stuck on the success text.
+const btnTimers = new WeakMap();
+
+function flashBtn(btn, label, ms) {
+  if (!btn.dataset.label) btn.dataset.label = btn.innerHTML;
+  clearTimeout(btnTimers.get(btn));
+  btn.innerHTML = label;
+  btnTimers.set(
+    btn,
+    setTimeout(() => {
+      btn.classList.remove("is-done", "is-failed");
+      btn.innerHTML = btn.dataset.label;
+    }, ms)
+  );
+}
+
 async function copyText(text, btn, doneLabel) {
-  const before = btn.innerHTML;
   const ok = await writeClipboard(text);
   btn.classList.toggle("is-done", ok);
   btn.classList.toggle("is-failed", !ok);
-  btn.innerHTML = ok ? doneLabel : "copy failed";
-  setTimeout(() => {
-    btn.classList.remove("is-failed");
-    resetBtn(btn, before);
-  }, ok ? 1400 : 2200);
+  flashBtn(btn, ok ? doneLabel : "copy failed", ok ? 1400 : 2200);
 }
 
 function copyPasteLine() {
@@ -692,6 +736,18 @@ async function init() {
   els.tabSingle.addEventListener("click", () => switchTab("single"));
   els.tabBatch.addEventListener("click", () => switchTab("batch"));
 
+  // Standard tablist keyboard behaviour: arrows move between tabs.
+  for (const tab of [els.tabSingle, els.tabBatch]) {
+    tab.addEventListener("keydown", (e) => {
+      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+        e.preventDefault();
+        const next = tab === els.tabSingle ? "batch" : "single";
+        switchTab(next);
+        (next === "single" ? els.tabSingle : els.tabBatch).focus();
+      }
+    });
+  }
+
   els.clear.addEventListener("click", () => {
     els.input.value = "";
     render();
@@ -724,7 +780,9 @@ async function init() {
   document.getElementById("copy-missing").addEventListener("click", (e) => {
     const text = batchMissing();
     if (!text) {
-      copyText("", e.currentTarget, "none missing");
+      // Nothing to copy. Flash the label without touching the clipboard,
+      // which would otherwise be wiped by writing an empty string.
+      flashBtn(e.currentTarget, "none missing", 1400);
       return;
     }
     copyText(text, e.currentTarget, "✓ copied");
@@ -754,6 +812,11 @@ async function init() {
     els.statusLeft.textContent = "index: failed";
     return;
   }
+
+  // JSON.parse yields a plain object whose prototype chain leaks names like
+  // "constructor" into `in` checks and property reads. Re-key onto a null
+  // prototype so the index behaves like a real map.
+  DATA.colors = Object.assign(Object.create(null), DATA.colors);
 
   KEYS = Object.keys(DATA.colors);
   setBootStatus(

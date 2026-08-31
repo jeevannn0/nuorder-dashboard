@@ -26,8 +26,11 @@ NOT_FOUND = "Not found in database"
 def load_data(url):
     try:
         df = pd.read_csv(url)
-        if "COLOR" in df.columns:
-            df["COLOR_LOWER"] = df["COLOR"].astype(str).str.strip().str.lower()
+        # Both columns are required further down; a sheet edit that renames
+        # either should degrade to the error banner, not a KeyError crash.
+        if "COLOR" not in df.columns or "Color Family" not in df.columns:
+            return pd.DataFrame()
+        df["COLOR_LOWER"] = df["COLOR"].astype(str).str.strip().str.lower()
         return df
     except Exception:
         return pd.DataFrame()
