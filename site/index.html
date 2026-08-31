@@ -3,7 +3,8 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>NuORDER Color Dashboard</title>
+    <meta name="color-scheme" content="dark" />
+    <title>nuorder · color-lookup</title>
     <meta
       name="description"
       content="Look up the customer facing color and color family for a raw vendor color."
@@ -11,54 +12,106 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <main class="wrap">
-      <h1>🎨 NuORDER Color Dashboard</h1>
-      <p class="lede">
-        Paste a raw color below to instantly generate the
-        <strong>Customer Facing Color</strong> and find its
-        <strong>Color Family</strong>.
-      </p>
+    <main class="term">
+      <div class="term-bar">
+        <span class="dot dot-r"></span>
+        <span class="dot dot-y"></span>
+        <span class="dot dot-g"></span>
+        <span class="term-title">nuorder — color-lookup</span>
+      </div>
 
-      <label class="field">
-        <span class="field-label">Paste Raw Vendor Color Here:</span>
-        <input
-          id="query"
-          type="text"
-          autocomplete="off"
-          spellcheck="false"
-          disabled
-          placeholder="Loading color database…"
-        />
-      </label>
+      <div class="term-body">
+        <div class="boot">
+          <p>
+            <span class="sigil">$</span> nuorder color-lookup
+            <span class="flag">--watch</span>
+          </p>
+          <p class="c-dim" id="boot-status" role="status" aria-live="polite">
+            loading index<span aria-hidden="true">…</span>
+          </p>
+        </div>
 
-      <p id="status" class="status status-loading" role="status" aria-live="polite">
-        Loading color database…
-      </p>
-
-      <section id="results" hidden aria-live="polite">
-        <hr />
-        <h2>Results</h2>
-        <div class="grid">
-          <div class="card">
-            <h3>Customer Facing Color</h3>
-            <p id="facing" class="value"></p>
+        <div class="prompt-wrap">
+          <div class="prompt-row">
+            <span class="prompt" aria-hidden="true">❯</span>
+            <input
+              id="query"
+              type="text"
+              autocomplete="off"
+              autocapitalize="off"
+              spellcheck="false"
+              disabled
+              placeholder="paste raw vendor color"
+              aria-label="Raw vendor color"
+              role="combobox"
+              aria-expanded="false"
+              aria-controls="suggest"
+              aria-autocomplete="list"
+            />
+            <button
+              id="clear-btn"
+              class="clear-btn"
+              type="button"
+              hidden
+              aria-label="Clear input"
+            >
+              ✕
+            </button>
           </div>
-          <div id="family-card" class="card">
-            <h3>Color Family</h3>
-            <p id="family" class="value"></p>
-            <p id="hint" class="hint" hidden>
-              To fix this, add the color to your Google Sheet.
+
+          <ul id="suggest" class="suggest" role="listbox" hidden
+              aria-label="Matching colors"></ul>
+        </div>
+
+        <section id="results" class="out" hidden aria-live="polite">
+          <div class="row">
+            <span class="key">customer_facing_color</span>
+            <span class="val" id="facing"></span>
+            <button class="btn btn-mini" type="button" data-copy="facing">
+              copy
+            </button>
+          </div>
+
+          <div class="row">
+            <span class="key">color_family</span>
+            <span class="val" id="family"></span>
+            <button class="btn btn-mini" type="button" data-copy="family">
+              copy
+            </button>
+          </div>
+
+          <p class="warn" id="warn" hidden>
+            ⚠ not in the sheet — add it to the Google Sheet, then the daily
+            rebuild will pick it up.
+          </p>
+
+          <p class="did-you-mean" id="dym" hidden></p>
+
+          <div class="copy-block">
+            <p class="c-dim" style="margin: 0">
+              <span class="sigil">$</span> pbcopy
+              <span class="c-dim">&lt;&lt;&lt; "$facing\t$family"</span>
             </p>
+            <div class="copy-line">
+              <code id="paste"></code>
+              <button class="btn" id="copy-btn" type="button">
+                copy <kbd>⏎</kbd>
+              </button>
+            </div>
           </div>
-        </div>
+        </section>
+      </div>
 
-        <h2>Copy for NuORDER:</h2>
-        <div class="copy-row">
-          <input id="copy-text" type="text" readonly aria-label="Tab separated result" />
-          <button id="copy-btn" type="button">Copy</button>
-        </div>
-      </section>
+      <div class="term-status">
+        <span id="status-left">index: —</span>
+        <span id="status-right">rebuilt: —</span>
+      </div>
     </main>
+
+    <p class="credit">
+      static build · logic verified against
+      <a href="https://github.com/jeevannn0/nuorder-dashboard">app.py</a>
+    </p>
 
     <script src="app.js"></script>
   </body>

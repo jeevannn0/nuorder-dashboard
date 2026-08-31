@@ -60,10 +60,20 @@ const data = JSON.parse(fs.readFileSync(path.join(root, 'site', 'data', 'colors.
 global.document = { addEventListener() {} };
 const sandbox = { module: {}, exports: {} };
 const fn = new Function('document', 'navigator', 'setTimeout', src + `
-  ;return { getCustomerFacingColor, pyTitle, setData: (d) => { DATA = d; } };
+  ;return { getCustomerFacingColor, pyTitle, FAMILY_SWATCH,
+            setData: (d) => { DATA = d; } };
 `);
 const api = fn({ addEventListener() {} }, {}, () => {});
 api.setData(data);
+
+// Every family the sheet produces must have a swatch defined in app.js.
+const missingSwatch = data.families.filter((f) => !(f in api.FAMILY_SWATCH));
+if (missingSwatch.length) {
+  console.log('MISSING SWATCH for families:', JSON.stringify(missingSwatch));
+  console.log('  add them to FAMILY_SWATCH in site/app.js');
+  process.exit(1);
+}
+console.log(`swatches: all ${data.families.length} families covered`);
 
 const { inputs, expected } = JSON.parse(
   fs.readFileSync(path.join(__dirname, '_parity_input.json'), 'utf8')
