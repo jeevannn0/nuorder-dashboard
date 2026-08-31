@@ -9,15 +9,25 @@ in app.py only.
 
 import ast
 import datetime as dt
+import hashlib
 import io
 import json
 import pathlib
+import re
 import sys
 import urllib.request
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 APP_PY = ROOT / "app.py"
-OUT = ROOT / "site" / "data" / "colors.json"
+SITE = ROOT / "site"
+INDEX = SITE / "index.html"
+OUT = SITE / "data" / "colors.json"
+
+# GitHub Pages serves assets with Cache-Control: max-age=600, so a browser can
+# hold a stale app.js or styles.css for ten minutes after a deploy and appear to
+# ignore a fix. Stamping the references with a content hash makes each deploy
+# request a new URL.
+STAMPED_ASSETS = ("styles.css", "app.js")
 
 SHEET_CSV_URL = (
     "https://docs.google.com/spreadsheets/d/e/"
@@ -35,6 +45,29 @@ def extract_from_app_py(name):
                 if isinstance(target, ast.Name) and target.id == name:
                     return ast.literal_eval(node.value)
     raise SystemExit(f"could not find `{name}` in {APP_PY}")
+
+
+def stamp_assets():
+    """Rewrite index.html asset references to include a content hash."""
+    html = INDEX.read_text(encoding="utf-8")
+    original = html
+
+    for name in STAMPED_ASSETS:
+        path = SITE / name
+        if not path.exists():
+            raise SystemExit(f"missing asset {path}")
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()[:10]
+        # Matches the bare name or an already-stamped one, so this is idempotent.
+        pattern = re.compile(rf'(?P<attr>href|src)="{re.escape(name)}(?:\?v=[^"]*)?"')
+        html, count = pattern.subn(
+            lambda m: f'{m.group("attr")}="{name}?v={digest}"', html
+        )
+        if count == 0:
+            raise SystemExit(f"could not find a reference to {name} in {INDEX}")
+        print(f"stamped     : {name}?v={digest} ({count} reference)")
+
+    if html != original:
+        INDEX.write_text(html, encoding="utf-8")
 
 
 def main():
@@ -92,6 +125,8 @@ def main():
     print(f"families   : {len(families)} {families}")
     print(f"skipped    : {skipped:,} rows (blank color or family)")
     print(f"wrote      : {OUT.relative_to(ROOT)} ({len(text.encode()):,} bytes)")
+
+    stamp_assets()
     return 0
 
 
