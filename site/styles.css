@@ -493,3 +493,216 @@ kbd {
     transition: none !important;
   }
 }
+
+/* --- boot line / refresh --- */
+
+.boot-line {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.cmd-hint {
+  margin: 0 0 0.5rem;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.spin {
+  display: inline-block;
+  animation: spin 0.9s linear infinite;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* --- tabs --- */
+
+.tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin: 0 0 0.9rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.tab {
+  padding: 0.32rem 0.85rem;
+  font: inherit;
+  font-size: 0.88rem;
+  color: var(--dim);
+  background: none;
+  border: 1px solid transparent;
+  border-bottom: 0;
+  border-radius: 6px 6px 0 0;
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+
+.tab:hover {
+  color: var(--fg);
+}
+
+.tab.is-active {
+  color: var(--cyan);
+  background: var(--term-2);
+  border-color: var(--line);
+}
+
+.tab:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: -2px;
+}
+
+/* --- batch --- */
+
+#batch-input {
+  display: block;
+  width: 100%;
+  padding: 0.6rem 0.7rem;
+  font: inherit;
+  font-size: 0.95rem;
+  color: var(--fg);
+  background: var(--term-2);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  resize: vertical;
+}
+
+#batch-input:focus-visible {
+  outline: none;
+  border-color: #2f6f7a;
+  box-shadow: 0 0 0 3px #56d4dd1f;
+}
+
+#batch-input::placeholder {
+  color: var(--dimmer);
+}
+
+.batch-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.batch-stats {
+  font-size: 0.82rem;
+  color: var(--dim);
+}
+
+.batch-copy {
+  display: flex;
+  gap: 0.4rem;
+  margin: 1.1rem 0 0.6rem;
+  flex-wrap: wrap;
+}
+
+.table-scroll {
+  max-height: 26rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.batch-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.86rem;
+}
+
+.batch-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  text-align: left;
+  font-weight: 400;
+  color: var(--dim);
+  background: var(--bar);
+  padding: 0.4rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+  white-space: nowrap;
+}
+
+.batch-table td {
+  padding: 0.3rem 0.6rem;
+  border-bottom: 1px solid #141a24;
+  vertical-align: top;
+  word-break: break-word;
+}
+
+.batch-table tbody tr:hover {
+  background: #101825;
+}
+
+.batch-table .col-n {
+  width: 3rem;
+  color: var(--dimmer);
+  text-align: right;
+}
+
+.batch-table td.col-n {
+  color: var(--dimmer);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.batch-table td.raw {
+  color: var(--dim);
+}
+
+.batch-table td.facing {
+  color: var(--fg);
+  font-weight: 700;
+}
+
+.batch-table td.fam {
+  white-space: nowrap;
+}
+
+.batch-table tr.is-missing td.fam {
+  color: var(--red);
+}
+
+.batch-table tr.is-missing {
+  background: #1d1214;
+}
+
+.batch-table tr.is-missing:hover {
+  background: #251619;
+}
+
+.fam-cell {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.batch-note {
+  margin: 0.55rem 0 0;
+  font-size: 0.8rem;
+}
+
+@media (max-width: 560px) {
+  .batch-table {
+    font-size: 0.8rem;
+  }
+  .batch-table .col-n,
+  .batch-table td.col-n {
+    display: none;
+  }
+}

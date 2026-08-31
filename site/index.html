@@ -26,78 +26,178 @@
             <span class="sigil">$</span> nuorder color-lookup
             <span class="flag">--watch</span>
           </p>
-          <p class="c-dim" id="boot-status" role="status" aria-live="polite">
-            loading index<span aria-hidden="true">…</span>
-          </p>
-        </div>
-
-        <div class="prompt-wrap">
-          <div class="prompt-row">
-            <span class="prompt" aria-hidden="true">❯</span>
-            <input
-              id="query"
-              type="text"
-              autocomplete="off"
-              autocapitalize="off"
-              spellcheck="false"
-              disabled
-              placeholder="paste raw vendor color"
-              aria-label="Raw vendor color"
-              role="combobox"
-              aria-expanded="false"
-              aria-controls="suggest"
-              aria-autocomplete="list"
-            />
+          <p class="c-dim boot-line">
+            <span id="boot-status" role="status" aria-live="polite"
+              >loading index<span aria-hidden="true">…</span></span
+            >
             <button
-              id="clear-btn"
-              class="clear-btn"
+              class="btn btn-mini"
+              id="refresh-btn"
               type="button"
               hidden
-              aria-label="Clear input"
+              title="Re-read the published Google Sheet right now"
             >
-              ✕
+              ↻ refresh
             </button>
-          </div>
-
-          <ul id="suggest" class="suggest" role="listbox" hidden
-              aria-label="Matching colors"></ul>
+          </p>
         </div>
 
-        <section id="results" class="out" hidden aria-live="polite">
-          <div class="row">
-            <span class="key">customer_facing_color</span>
-            <span class="val" id="facing"></span>
-            <button class="btn btn-mini" type="button" data-copy="facing">
-              copy
-            </button>
-          </div>
+        <div class="tabs" role="tablist" aria-label="Mode">
+          <button
+            class="tab is-active"
+            id="tab-single"
+            role="tab"
+            type="button"
+            aria-selected="true"
+            aria-controls="panel-single"
+          >
+            lookup
+          </button>
+          <button
+            class="tab"
+            id="tab-batch"
+            role="tab"
+            type="button"
+            aria-selected="false"
+            aria-controls="panel-batch"
+          >
+            batch
+          </button>
+        </div>
 
-          <div class="row">
-            <span class="key">color_family</span>
-            <span class="val" id="family"></span>
-            <button class="btn btn-mini" type="button" data-copy="family">
-              copy
-            </button>
-          </div>
-
-          <p class="warn" id="warn" hidden>
-            ⚠ not in the sheet — add it to the Google Sheet, then the daily
-            rebuild will pick it up.
-          </p>
-
-          <p class="did-you-mean" id="dym" hidden></p>
-
-          <div class="copy-block">
-            <p class="c-dim" style="margin: 0">
-              <span class="sigil">$</span> pbcopy
-              <span class="c-dim">&lt;&lt;&lt; "$facing\t$family"</span>
-            </p>
-            <div class="copy-line">
-              <code id="paste"></code>
-              <button class="btn" id="copy-btn" type="button">
-                copy <kbd>⏎</kbd>
+        <!-- ---------- single lookup ---------- -->
+        <section id="panel-single" role="tabpanel" aria-labelledby="tab-single">
+          <div class="prompt-wrap">
+            <div class="prompt-row">
+              <span class="prompt" aria-hidden="true">❯</span>
+              <input
+                id="query"
+                type="text"
+                autocomplete="off"
+                autocapitalize="off"
+                spellcheck="false"
+                disabled
+                placeholder="paste raw vendor color"
+                aria-label="Raw vendor color"
+                role="combobox"
+                aria-expanded="false"
+                aria-controls="suggest"
+                aria-autocomplete="list"
+              />
+              <button
+                id="clear-btn"
+                class="clear-btn"
+                type="button"
+                hidden
+                aria-label="Clear input"
+              >
+                ✕
               </button>
             </div>
+
+            <ul
+              id="suggest"
+              class="suggest"
+              role="listbox"
+              hidden
+              aria-label="Matching colors"
+            ></ul>
+          </div>
+
+          <section id="results" class="out" hidden aria-live="polite">
+            <div class="row">
+              <span class="key">customer_facing_color</span>
+              <span class="val" id="facing"></span>
+              <button class="btn btn-mini" type="button" data-copy="facing">
+                copy
+              </button>
+            </div>
+
+            <div class="row">
+              <span class="key">color_family</span>
+              <span class="val" id="family"></span>
+              <button class="btn btn-mini" type="button" data-copy="family">
+                copy
+              </button>
+            </div>
+
+            <p class="warn" id="warn" hidden>
+              ⚠ not in the sheet — add it to the Google Sheet, then refresh.
+            </p>
+
+            <p class="did-you-mean" id="dym" hidden></p>
+
+            <div class="copy-block">
+              <p class="c-dim cmd-hint">
+                <span class="sigil">$</span> pbcopy
+                <span class="c-dim">&lt;&lt;&lt; "$facing\t$family"</span>
+              </p>
+              <div class="copy-line">
+                <code id="paste"></code>
+                <button class="btn" id="copy-btn" type="button">
+                  copy <kbd>⏎</kbd>
+                </button>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <!-- ---------- batch ---------- -->
+        <section id="panel-batch" role="tabpanel" aria-labelledby="tab-batch" hidden>
+          <p class="c-dim cmd-hint">
+            <span class="sigil">$</span> nuorder color-lookup
+            <span class="flag">--batch</span>
+            <span class="c-dim">&lt; colors.txt</span>
+          </p>
+          <label class="sr-only" for="batch-input">
+            Raw vendor colors, one per line
+          </label>
+          <textarea
+            id="batch-input"
+            rows="7"
+            spellcheck="false"
+            autocapitalize="off"
+            placeholder="paste one raw vendor color per line — a column straight out of Excel works"
+          ></textarea>
+
+          <div class="batch-actions">
+            <button class="btn" id="batch-run" type="button">run</button>
+            <button class="btn btn-mini" id="batch-clear" type="button">
+              clear
+            </button>
+            <span class="batch-stats" id="batch-stats" aria-live="polite"></span>
+          </div>
+
+          <div id="batch-out" hidden>
+            <div class="batch-copy">
+              <button class="btn btn-mini" id="copy-tsv" type="button">
+                copy facing + family
+              </button>
+              <button class="btn btn-mini" id="copy-all" type="button">
+                copy all columns
+              </button>
+              <button class="btn btn-mini" id="copy-missing" type="button">
+                copy missing only
+              </button>
+              <button class="btn btn-mini" id="download-csv" type="button">
+                download .csv
+              </button>
+            </div>
+
+            <div class="table-scroll">
+              <table class="batch-table">
+                <thead>
+                  <tr>
+                    <th class="col-n" scope="col">#</th>
+                    <th scope="col">raw_input</th>
+                    <th scope="col">customer_facing_color</th>
+                    <th scope="col">color_family</th>
+                  </tr>
+                </thead>
+                <tbody id="batch-rows"></tbody>
+              </table>
+            </div>
+            <p class="c-dim batch-note" id="batch-note" hidden></p>
           </div>
         </section>
       </div>

@@ -4,6 +4,7 @@
 
 const NOT_FOUND = "Not found in database";
 const MAX_SUGGESTIONS = 8;
+const MAX_BATCH_ROWS_RENDERED = 1000;
 
 // Presentation only. scripts/verify_parity.py asserts every family present in
 // colors.json has an entry here, so a new family in the sheet cannot silently
@@ -33,6 +34,7 @@ let DATA = null;
 let KEYS = [];
 let matches = [];
 let activeIndex = -1;
+let batchResults = [];
 
 /**
  * Faithful port of Python's str.title().
@@ -98,7 +100,118 @@ function findMatches(rawQuery) {
   return prefix.concat(infix).slice(0, MAX_SUGGESTIONS);
 }
 
-// --- rendering ---
+// --- live refresh -----------------------------------------------------------
+
+/** Minimal RFC 4180 parser: handles quoted fields, escaped quotes and CRLF. */
+function parseCSV(text) {
+  const rows = [];
+  let row = [];
+  let field = "";
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') {
+          field += '"';
+          i++;
+        } else {
+          inQuotes = false;
+        }
+      } else {
+        field += c;
+      }
+    } else if (c === '"') {
+      inQuotes = true;
+    } else if (c === ",") {
+      row.push(field);
+      field = "";
+    } else if (c === "\n") {
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = "";
+    } else if (c !== "\r") {
+      field += c;
+    }
+  }
+  if (field.length > 0 || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+  return rows;
+}
+
+/**
+ * Re-read the published sheet in the browser and rebuild the index.
+ * Mirrors scripts/build_data.py: first match wins, blanks skipped.
+ */
+async function refreshFromSheet() {
+  const btn = els.refresh;
+  const before = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin">↻</span> fetching';
+
+  try {
+    const resp = await fetch(DATA.source, { cache: "no-store" });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+    const rows = parseCSV(await resp.text());
+    if (rows.length < 2) throw new Error("sheet looks empty");
+
+    const header = rows[0].map((h) => h.trim());
+    const ci = header.indexOf("COLOR");
+    const fi = header.indexOf("Color Family");
+    if (ci === -1 || fi === -1) {
+      throw new Error("expected COLOR and 'Color Family' columns");
+    }
+
+    const families = [];
+    const famIndex = new Map();
+    const colors = Object.create(null);
+
+    for (let r = 1; r < rows.length; r++) {
+      const color = (rows[r][ci] || "").trim();
+      const family = (rows[r][fi] || "").trim();
+      if (!color || !family) continue;
+      const key = color.toLowerCase();
+      if (key in colors) continue;
+      if (!famIndex.has(family)) {
+        famIndex.set(family, families.length);
+        families.push(family);
+      }
+      colors[key] = famIndex.get(family);
+    }
+
+    const n = Object.keys(colors).length;
+    if (n === 0) throw new Error("no usable rows");
+
+    DATA.colors = colors;
+    DATA.families = families;
+    DATA.generated = new Date().toISOString();
+    KEYS = Object.keys(colors);
+
+    setBootStatus(n, families.length, null, "live");
+    els.statusRight.textContent = `refreshed: ${new Date().toLocaleString()} (live)`;
+
+    btn.disabled = false;
+    btn.innerHTML = "✓ up to date";
+    setTimeout(() => {
+      btn.innerHTML = before;
+    }, 1800);
+
+    // Re-run whatever is on screen against the new index.
+    if (els.input.value) render();
+    if (batchResults.length) runBatch();
+  } catch (err) {
+    btn.disabled = false;
+    btn.innerHTML = before;
+    els.boot.className = "c-red";
+    els.boot.textContent = `refresh failed: ${err.message}`;
+  }
+}
+
+// --- rendering --------------------------------------------------------------
 
 const els = {};
 
@@ -109,6 +222,43 @@ function swatchFor(family) {
   span.style.background = paint;
   span.setAttribute("aria-hidden", "true");
   return span;
+}
+
+function setBootStatus(count, familyCount, ms, tag) {
+  els.boot.className = "";
+  els.boot.textContent = "";
+  els.boot.append(
+    document.createTextNode("indexed "),
+    Object.assign(document.createElement("span"), {
+      className: "c-cyan",
+      textContent: count.toLocaleString(),
+    }),
+    document.createTextNode(" colors · "),
+    Object.assign(document.createElement("span"), {
+      className: "c-cyan",
+      textContent: String(familyCount),
+    }),
+    document.createTextNode(" families")
+  );
+  if (ms !== null && ms !== undefined) {
+    els.boot.append(
+      document.createTextNode(" · "),
+      Object.assign(document.createElement("span"), {
+        className: "c-green",
+        textContent: `${ms}ms`,
+      })
+    );
+  }
+  if (tag) {
+    els.boot.append(
+      document.createTextNode(" · "),
+      Object.assign(document.createElement("span"), {
+        className: "c-green",
+        textContent: tag,
+      })
+    );
+  }
+  els.statusLeft.textContent = `index: ${count.toLocaleString()} colors`;
 }
 
 function renderSuggestions(rawQuery) {
@@ -271,6 +421,122 @@ function render(opts = {}) {
   }
 }
 
+// --- batch ------------------------------------------------------------------
+
+function runBatch() {
+  const lines = els.batchInput.value
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter((l) => l.length > 0);
+
+  batchResults = lines.map((raw) => {
+    const { found, family } = lookupFamily(raw);
+    return { raw, facing: getCustomerFacingColor(raw), family, found };
+  });
+
+  const total = batchResults.length;
+  const missing = batchResults.filter((r) => !r.found).length;
+
+  if (total === 0) {
+    els.batchOut.hidden = true;
+    els.batchStats.textContent = "nothing to process";
+    return;
+  }
+
+  els.batchStats.textContent = `${total} row${total === 1 ? "" : "s"} · ${
+    total - missing
+  } matched · ${missing} missing`;
+
+  const shown = Math.min(total, MAX_BATCH_ROWS_RENDERED);
+  const frag = document.createDocumentFragment();
+
+  for (let i = 0; i < shown; i++) {
+    const r = batchResults[i];
+    const tr = document.createElement("tr");
+    if (!r.found) tr.className = "is-missing";
+
+    const n = document.createElement("td");
+    n.className = "col-n";
+    n.textContent = String(i + 1);
+
+    const raw = document.createElement("td");
+    raw.className = "raw";
+    raw.textContent = r.raw;
+
+    const facing = document.createElement("td");
+    facing.className = "facing";
+    facing.textContent = r.facing;
+
+    const fam = document.createElement("td");
+    fam.className = "fam";
+    const wrap = document.createElement("span");
+    wrap.className = "fam-cell";
+    if (r.found) wrap.appendChild(swatchFor(r.family));
+    wrap.appendChild(document.createTextNode(r.found ? r.family : "✗ not found"));
+    fam.appendChild(wrap);
+
+    tr.append(n, raw, facing, fam);
+    frag.appendChild(tr);
+  }
+
+  els.batchRows.textContent = "";
+  els.batchRows.appendChild(frag);
+
+  if (total > shown) {
+    els.batchNote.textContent = `showing the first ${shown.toLocaleString()} of ${total.toLocaleString()} rows — copy and download include all of them.`;
+    els.batchNote.hidden = false;
+  } else {
+    els.batchNote.hidden = true;
+  }
+
+  els.batchOut.hidden = false;
+}
+
+function batchTSV() {
+  return batchResults.map((r) => `${r.facing}\t${r.family}`).join("\n");
+}
+
+function batchAllColumns() {
+  return [
+    "raw_input\tcustomer_facing_color\tcolor_family",
+    ...batchResults.map((r) => `${r.raw}\t${r.facing}\t${r.family}`),
+  ].join("\n");
+}
+
+function batchMissing() {
+  return batchResults
+    .filter((r) => !r.found)
+    .map((r) => r.raw)
+    .join("\n");
+}
+
+function csvCell(v) {
+  return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+}
+
+function downloadCSV() {
+  const csv = [
+    "raw_input,customer_facing_color,color_family",
+    ...batchResults.map((r) =>
+      [r.raw, r.facing, r.family].map(csvCell).join(",")
+    ),
+  ].join("\r\n");
+
+  const blob = new Blob([`\ufeff${csv}`], {
+    type: "text/csv;charset=utf-8",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "nuorder-colors.csv";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+}
+
+// --- clipboard --------------------------------------------------------------
+
 function resetBtn(btn, html) {
   btn.classList.remove("is-done");
   btn.innerHTML = html;
@@ -301,9 +567,14 @@ async function copyText(text, btn, doneLabel) {
 }
 
 function copyPasteLine() {
-  const family = els.family.textContent;
-  copyText(`${els.facing.textContent}\t${family}`, els.copyBtn, "copied ✓");
+  copyText(
+    `${els.facing.textContent}\t${els.family.textContent}`,
+    els.copyBtn,
+    "copied ✓"
+  );
 }
+
+// --- keyboard ---------------------------------------------------------------
 
 function onKeyDown(e) {
   const open = !els.suggest.hidden && matches.length > 0;
@@ -333,6 +604,20 @@ function onKeyDown(e) {
   }
 }
 
+function switchTab(which) {
+  const single = which === "single";
+  els.tabSingle.classList.toggle("is-active", single);
+  els.tabBatch.classList.toggle("is-active", !single);
+  els.tabSingle.setAttribute("aria-selected", String(single));
+  els.tabBatch.setAttribute("aria-selected", String(!single));
+  els.panelSingle.hidden = !single;
+  els.panelBatch.hidden = single;
+  if (single) els.input.focus();
+  else els.batchInput.focus();
+}
+
+// --- init -------------------------------------------------------------------
+
 async function init() {
   els.input = document.getElementById("query");
   els.clear = document.getElementById("clear-btn");
@@ -345,10 +630,27 @@ async function init() {
   els.paste = document.getElementById("paste");
   els.copyBtn = document.getElementById("copy-btn");
   els.boot = document.getElementById("boot-status");
+  els.refresh = document.getElementById("refresh-btn");
   els.statusLeft = document.getElementById("status-left");
   els.statusRight = document.getElementById("status-right");
 
+  els.tabSingle = document.getElementById("tab-single");
+  els.tabBatch = document.getElementById("tab-batch");
+  els.panelSingle = document.getElementById("panel-single");
+  els.panelBatch = document.getElementById("panel-batch");
+
+  els.batchInput = document.getElementById("batch-input");
+  els.batchRun = document.getElementById("batch-run");
+  els.batchClear = document.getElementById("batch-clear");
+  els.batchStats = document.getElementById("batch-stats");
+  els.batchOut = document.getElementById("batch-out");
+  els.batchRows = document.getElementById("batch-rows");
+  els.batchNote = document.getElementById("batch-note");
+
   els.copyBtn.addEventListener("click", copyPasteLine);
+  els.refresh.addEventListener("click", refreshFromSheet);
+  els.tabSingle.addEventListener("click", () => switchTab("single"));
+  els.tabBatch.addEventListener("click", () => switchTab("batch"));
 
   els.clear.addEventListener("click", () => {
     els.input.value = "";
@@ -356,10 +658,42 @@ async function init() {
     els.input.focus();
   });
 
+  els.batchRun.addEventListener("click", runBatch);
+  els.batchInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      runBatch();
+    }
+  });
+  els.batchClear.addEventListener("click", () => {
+    els.batchInput.value = "";
+    batchResults = [];
+    els.batchOut.hidden = true;
+    els.batchStats.textContent = "";
+    els.batchInput.focus();
+  });
+
+  document
+    .getElementById("copy-tsv")
+    .addEventListener("click", (e) => copyText(batchTSV(), e.currentTarget, "✓ copied"));
+  document
+    .getElementById("copy-all")
+    .addEventListener("click", (e) =>
+      copyText(batchAllColumns(), e.currentTarget, "✓ copied")
+    );
+  document.getElementById("copy-missing").addEventListener("click", (e) => {
+    const text = batchMissing();
+    if (!text) {
+      copyText("", e.currentTarget, "none missing");
+      return;
+    }
+    copyText(text, e.currentTarget, "✓ copied");
+  });
+  document.getElementById("download-csv").addEventListener("click", downloadCSV);
+
   for (const btn of document.querySelectorAll("[data-copy]")) {
     btn.addEventListener("click", () => {
-      const target = els[btn.dataset.copy];
-      copyText(target.textContent, btn, "✓");
+      copyText(els[btn.dataset.copy].textContent, btn, "✓");
     });
   }
 
@@ -375,7 +709,6 @@ async function init() {
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     DATA = await resp.json();
   } catch (err) {
-    els.boot.innerHTML = "";
     els.boot.className = "c-red";
     els.boot.textContent = `error: could not load data/colors.json (${err.message})`;
     els.statusLeft.textContent = "index: failed";
@@ -383,34 +716,18 @@ async function init() {
   }
 
   KEYS = Object.keys(DATA.colors);
-  const ms = Math.round(performance.now() - t0);
-  const count = KEYS.length.toLocaleString();
-  const stamp = new Date(DATA.generated);
-
-  els.boot.innerHTML = "";
-  els.boot.append(
-    document.createTextNode("indexed "),
-    Object.assign(document.createElement("span"), {
-      className: "c-cyan",
-      textContent: count,
-    }),
-    document.createTextNode(" colors · "),
-    Object.assign(document.createElement("span"), {
-      className: "c-cyan",
-      textContent: String(DATA.families.length),
-    }),
-    document.createTextNode(" families · "),
-    Object.assign(document.createElement("span"), {
-      className: "c-green",
-      textContent: `${ms}ms`,
-    })
+  setBootStatus(
+    KEYS.length,
+    DATA.families.length,
+    Math.round(performance.now() - t0),
+    null
   );
-
-  els.statusLeft.textContent = `index: ${count} colors`;
-  els.statusRight.textContent = `rebuilt: ${stamp.toLocaleString()}`;
+  els.statusRight.textContent = `rebuilt: ${new Date(
+    DATA.generated
+  ).toLocaleString()}`;
+  els.refresh.hidden = false;
 
   els.input.disabled = false;
-  els.input.placeholder = "paste raw vendor color";
   els.input.addEventListener("input", () => render());
   els.input.addEventListener("keydown", onKeyDown);
   els.input.focus();

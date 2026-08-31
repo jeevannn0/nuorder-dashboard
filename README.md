@@ -8,8 +8,34 @@ There are two ways to run it, sharing one source of truth for the logic.
 | | Static site (GitHub Pages) | Streamlit app (local) |
 |---|---|---|
 | Entry point | `site/index.html` | `app.py` |
-| Data | `site/data/colors.json`, rebuilt daily in CI | read live from the sheet, 60s cache |
+| Data | `site/data/colors.json`, rebuilt daily in CI, plus on-demand live refresh | read live from the sheet, 60s cache |
 | Needs a server | no | yes (Python) |
+
+## What the static site does
+
+**Single lookup** with shell-style completion over the whole index. Prefix
+matches rank above substring matches, capped at 8. Arrow keys move, `tab`
+completes, `enter` copies, `esc` dismisses. A near miss offers the real
+spelling instead of dead-ending, so a typo no longer looks like a missing
+color.
+
+**Batch mode** takes one raw color per line — paste a column straight out of
+Excel. You get a table of `raw_input`, `customer_facing_color` and
+`color_family` with unmatched rows flagged, plus four outputs: the two NuORDER
+columns as TSV, all three columns, just the unmatched inputs (handy for
+appending to the sheet), or a `.csv` download. 5,000 rows process in about
+20ms; the table renders the first 1,000 while copy and download cover
+everything.
+
+**Live refresh** re-reads the published sheet in the browser and rebuilds the
+index in place, which restores the always-current behaviour of the Streamlit
+app's 60-second cache. It works because the published sheet sends
+`Access-Control-Allow-Origin: *`. The client-side CSV parse was checked against
+`build_data.py` and produces an identical index: same 116,508 colors, same 14
+families in the same order, zero family mismatches.
+
+**Family swatches** rather than a coloured status card, since the family is
+data and not a success signal.
 
 ## Static site
 
