@@ -755,3 +755,10 @@ kbd,
   border-color: var(--err-line, #7c3b3b);
   background: #2a1518;
 }
+
+.copy-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  -webkit-user-select: none;
+  user-select: none;
+}

@@ -4,6 +4,8 @@
 
 const NOT_FOUND = "Not found in database";
 const MAX_SUGGESTIONS = 8;
+// Kept in one place because render() resets the button label on every keystroke.
+const COPY_BOTH_LABEL = 'copy both <kbd>⏎</kbd>';
 const MAX_BATCH_ROWS_RENDERED = 1000;
 
 // Presentation only. scripts/verify_parity.py asserts every family present in
@@ -392,7 +394,7 @@ function render(opts = {}) {
   );
 
   els.results.hidden = false;
-  resetBtn(els.copyBtn, 'copy <kbd>⏎</kbd>');
+  resetBtn(els.copyBtn, COPY_BOTH_LABEL);
 
   if (opts.suggest === false) {
     els.dym.hidden = true;
@@ -609,7 +611,7 @@ async function copyText(text, btn, doneLabel) {
 function copyPasteLine() {
   // els.paste already holds the exact text, tab included, so the button and a
   // manual selection cannot disagree.
-  copyText(els.paste.textContent, els.copyBtn, "copied ✓");
+  copyText(els.paste.textContent, els.copyBtn, "copied both ✓");
 }
 
 // --- keyboard ---------------------------------------------------------------
@@ -731,7 +733,7 @@ async function init() {
 
   for (const btn of document.querySelectorAll("[data-copy]")) {
     btn.addEventListener("click", () => {
-      copyText(els[btn.dataset.copy].textContent, btn, "✓");
+      copyText(els[btn.dataset.copy].textContent, btn, "copied ✓");
     });
   }
 
