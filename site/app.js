@@ -530,6 +530,16 @@ function batchTSV() {
   return batchResults.map((r) => `${r.facing}\t${r.family}`).join("\n");
 }
 
+// Single-column exports: one value per line, in row order, so the column can
+// be pasted straight back alongside the source rows in a spreadsheet.
+function batchFacingColumn() {
+  return batchResults.map((r) => r.facing).join("\n");
+}
+
+function batchFamilyColumn() {
+  return batchResults.map((r) => r.family).join("\n");
+}
+
 function batchAllColumns() {
   return [
     "raw_input\tcustomer_facing_color\tcolor_family",
@@ -769,6 +779,16 @@ async function init() {
     els.batchInput.focus();
   });
 
+  document
+    .getElementById("copy-facing-col")
+    .addEventListener("click", (e) =>
+      copyText(batchFacingColumn(), e.currentTarget, "✓ copied")
+    );
+  document
+    .getElementById("copy-family-col")
+    .addEventListener("click", (e) =>
+      copyText(batchFamilyColumn(), e.currentTarget, "✓ copied")
+    );
   document
     .getElementById("copy-tsv")
     .addEventListener("click", (e) => copyText(batchTSV(), e.currentTarget, "✓ copied"));
