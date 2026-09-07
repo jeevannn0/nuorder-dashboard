@@ -38,6 +38,14 @@ let matches = [];
 let activeIndex = -1;
 let batchResults = [];
 
+// Extra data sources (user-added published CSV links). The URL list persists
+// in localStorage per browser; parsed rows are re-fetched each visit.
+// PRIMARY holds the built-in sheet's index so removing a source can rebuild
+// the merged index without refetching anything.
+const SOURCES_LS_KEY = "nuorder.sources.v1";
+let PRIMARY = null; // { colors: null-proto {key -> family index}, families: [...] }
+let EXTRAS = []; // [{ id, url, status: 'loading'|'ok'|'error', error, entries: [[key, familyName]], added }]
+
 /**
  * Faithful port of Python's str.title().
  * Words are delimited by anything that is not a letter, so digits count as
@@ -151,82 +159,348 @@ function parseCSV(text) {
 }
 
 /**
- * Re-read the published sheet in the browser and rebuild the index.
- * Mirrors scripts/build_data.py: first match wins, blanks skipped.
+ * Parse sheet CSV text into [[key, familyName], ...] entries.
+ * Same contract as scripts/build_data.py: COLOR and 'Color Family' columns,
+ * blanks skipped, first occurrence wins within the source.
  */
-async function refreshFromSheet() {
-  const btn = els.refresh;
-  const before = btn.innerHTML;
-  btn.disabled = true;
-  btn.innerHTML = '<span class="spin">↻</span> fetching';
+function parseSheetCSV(text) {
+  // A UTF-8 BOM would glue itself onto the first header cell and break the
+  // COLOR column detection.
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
+  const rows = parseCSV(text);
+  if (rows.length < 2) throw new Error("sheet looks empty");
 
-  try {
-    const resp = await fetch(DATA.source, { cache: "no-store" });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    let text = await resp.text();
-    // A UTF-8 BOM would glue itself onto the first header cell and break the
-    // COLOR column detection.
-    if (text.charCodeAt(0) === 0xfeff) text = text.slice(1);
-    const rows = parseCSV(text);
-    if (rows.length < 2) throw new Error("sheet looks empty");
+  const header = rows[0].map((h) => h.trim());
+  const ci = header.indexOf("COLOR");
+  const fi = header.indexOf("Color Family");
+  if (ci === -1 || fi === -1) {
+    throw new Error("needs COLOR and 'Color Family' columns");
+  }
 
-    const header = rows[0].map((h) => h.trim());
-    const ci = header.indexOf("COLOR");
-    const fi = header.indexOf("Color Family");
-    if (ci === -1 || fi === -1) {
-      throw new Error("expected COLOR and 'Color Family' columns");
-    }
+  const seen = new Set();
+  const entries = [];
+  for (let r = 1; r < rows.length; r++) {
+    const color = (rows[r][ci] || "").trim();
+    const family = (rows[r][fi] || "").trim();
+    if (!color || !family) continue;
+    const key = color.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    entries.push([key, family]);
+  }
+  if (entries.length === 0) throw new Error("no usable rows");
+  return entries;
+}
 
-    const families = [];
-    const famIndex = new Map();
-    const colors = Object.create(null);
+async function fetchSource(url) {
+  const resp = await fetch(url, { cache: "no-store" });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return parseSheetCSV(await resp.text());
+}
 
-    for (let r = 1; r < rows.length; r++) {
-      const color = (rows[r][ci] || "").trim();
-      const family = (rows[r][fi] || "").trim();
-      if (!color || !family) continue;
-      const key = color.toLowerCase();
-      if (key in colors) continue;
+/**
+ * Rebuild the merged lookup index: built-in sheet first, then each extra
+ * source in order. First occurrence of a color wins, matching the dedupe rule
+ * used everywhere else. Families unknown to the built-in sheet are appended
+ * and render with the fallback swatch.
+ */
+function rebuildIndex() {
+  const colors = Object.assign(Object.create(null), PRIMARY.colors);
+  const families = [...PRIMARY.families];
+  const famIndex = new Map(families.map((f, i) => [f, i]));
+
+  for (const src of EXTRAS) {
+    src.added = 0;
+    if (src.status !== "ok" || !src.entries) continue;
+    for (const [key, family] of src.entries) {
+      if (Object.hasOwn(colors, key)) continue;
       if (!famIndex.has(family)) {
         famIndex.set(family, families.length);
         families.push(family);
       }
       colors[key] = famIndex.get(family);
+      src.added++;
+    }
+  }
+
+  DATA.colors = colors;
+  DATA.families = families;
+  KEYS = Object.keys(colors);
+
+  const okExtras = EXTRAS.filter((s) => s.status === "ok").length;
+  const tag = okExtras > 0 ? `${1 + okExtras} sources` : null;
+  setBootStatus(KEYS.length, families.length, null, tag);
+
+  // Re-run whatever is on screen against the new index. suggest:false so a
+  // background rebuild does not pop the completion menu open under the
+  // user's cursor.
+  if (els.input.value) render({ suggest: false });
+  if (batchResults.length) runBatch();
+}
+
+// --- source list persistence and management ---------------------------------
+
+function loadSourceList() {
+  try {
+    const raw = localStorage.getItem(SOURCES_LS_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed.sources)
+      ? parsed.sources.filter((s) => s && typeof s.url === "string")
+      : [];
+  } catch {
+    return []; // private mode or corrupted entry: degrade to no extras
+  }
+}
+
+function saveSourceList() {
+  try {
+    localStorage.setItem(
+      SOURCES_LS_KEY,
+      JSON.stringify({ version: 1, sources: EXTRAS.map(({ id, url }) => ({ id, url })) })
+    );
+  } catch {
+    // Not persistable (private mode). The source still works this session.
+  }
+}
+
+/**
+ * Accept a published-CSV URL. As a convenience, a regular Google Sheets
+ * /edit link is rewritten to its CSV export form; if that sheet is not
+ * link-shared the fetch fails with a clear error anyway.
+ */
+function normalizeSourceUrl(raw) {
+  const url = raw.trim();
+  if (!/^https:\/\//i.test(url)) {
+    throw new Error("must be an https:// link");
+  }
+  new URL(url); // throws on garbage
+  const m = url.match(
+    /^https:\/\/docs\.google\.com\/spreadsheets\/d\/([\w-]+)\/edit(?:.*?[#?&]gid=(\d+))?/
+  );
+  if (m) {
+    return (
+      `https://docs.google.com/spreadsheets/d/${m[1]}/export?format=csv` +
+      (m[2] ? `&gid=${m[2]}` : "")
+    );
+  }
+  return url;
+}
+
+function sourceMsg(text, isError) {
+  els.sourceMsg.textContent = text;
+  els.sourceMsg.className = isError ? "status status-error" : "status";
+}
+
+async function addSource() {
+  let url;
+  try {
+    url = normalizeSourceUrl(els.sourceUrl.value);
+  } catch (e) {
+    sourceMsg(`not a usable link: ${e.message}`, true);
+    return;
+  }
+  if (url === DATA.source) {
+    sourceMsg("that is the built-in sheet — it is always included", true);
+    return;
+  }
+  if (EXTRAS.some((s) => s.url === url)) {
+    sourceMsg("already added", true);
+    return;
+  }
+
+  const src = { id: `s${Date.now().toString(36)}`, url, status: "loading" };
+  EXTRAS.push(src);
+  renderSources();
+  sourceMsg("fetching…", false);
+  els.sourceAdd.disabled = true;
+
+  try {
+    src.entries = await fetchSource(url);
+    src.status = "ok";
+    saveSourceList();
+    rebuildIndex();
+    renderSources();
+    els.sourceUrl.value = "";
+    sourceMsg(`added — ${src.added.toLocaleString()} new colors from ${src.entries.length.toLocaleString()} rows`, false);
+  } catch (e) {
+    EXTRAS = EXTRAS.filter((s) => s !== src);
+    renderSources();
+    sourceMsg(
+      `could not use that source: ${e.message}. It must be a public CSV link ` +
+        "(Google Sheets: File → Share → Publish to web → CSV).",
+      true
+    );
+  } finally {
+    els.sourceAdd.disabled = false;
+  }
+}
+
+function removeSource(id) {
+  EXTRAS = EXTRAS.filter((s) => s.id !== id);
+  saveSourceList();
+  rebuildIndex();
+  renderSources();
+  sourceMsg("source removed", false);
+}
+
+function shortUrl(url) {
+  try {
+    const u = new URL(url);
+    const tail = u.pathname.length > 34 ? `…${u.pathname.slice(-30)}` : u.pathname;
+    return u.hostname + tail;
+  } catch {
+    return url;
+  }
+}
+
+function renderSources() {
+  const list = els.sourceList;
+  list.textContent = "";
+
+  const addRow = (dotCls, name, url, meta, removeId, error) => {
+    const li = document.createElement("li");
+
+    const dot = document.createElement("span");
+    dot.className = `src-dot ${dotCls}`;
+    li.appendChild(dot);
+
+    const nm = document.createElement("span");
+    nm.className = "src-name";
+    nm.textContent = name;
+    li.appendChild(nm);
+
+    const u = document.createElement("span");
+    u.className = "src-url";
+    u.textContent = shortUrl(url);
+    u.title = url;
+    li.appendChild(u);
+
+    const mt = document.createElement("span");
+    mt.className = "src-meta";
+    mt.textContent = meta;
+    li.appendChild(mt);
+
+    if (removeId) {
+      const rm = document.createElement("button");
+      rm.type = "button";
+      rm.className = "btn btn-mini";
+      rm.textContent = "remove";
+      rm.addEventListener("click", () => removeSource(removeId));
+      li.appendChild(rm);
     }
 
-    const n = Object.keys(colors).length;
-    if (n === 0) throw new Error("no usable rows");
+    if (error) {
+      const er = document.createElement("span");
+      er.className = "src-err";
+      er.textContent = `✗ ${error}`;
+      li.appendChild(er);
+    }
 
-    DATA.colors = colors;
-    DATA.families = families;
+    list.appendChild(li);
+  };
+
+  addRow(
+    "",
+    "built-in",
+    DATA.source,
+    `${Object.keys(PRIMARY.colors).length.toLocaleString()} colors`,
+    null,
+    null
+  );
+
+  for (const s of EXTRAS) {
+    const meta =
+      s.status === "ok"
+        ? `adds ${Number(s.added ?? 0).toLocaleString()} colors`
+        : s.status === "loading"
+          ? "fetching…"
+          : "failed";
+    addRow(
+      s.status === "ok" ? "" : s.status === "loading" ? "is-loading" : "is-error",
+      s.id,
+      s.url,
+      meta,
+      s.id,
+      s.status === "error" ? s.error : null
+    );
+  }
+}
+
+/**
+ * Re-read the built-in sheet and every extra source, then rebuild the index.
+ */
+async function refreshAll() {
+  const btn = els.refresh;
+  const before = btn.innerHTML;
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin">↻</span> fetching';
+
+  let primaryFailed = null;
+  try {
+    const entries = parseSheetCSVToPrimary(await fetchText(DATA.source));
+    PRIMARY = entries;
     DATA.generated = new Date().toISOString();
-    KEYS = Object.keys(colors);
-
-    setBootStatus(n, families.length, null, "live");
     els.statusRight.textContent = `refreshed: ${new Date().toLocaleString()} (live)`;
-
-    btn.disabled = false;
-    btn.innerHTML = "✓ up to date";
-    setTimeout(() => {
-      btn.innerHTML = before;
-    }, 1800);
-
-    // Re-run whatever is on screen against the new index. suggest:false so a
-    // background refresh does not pop the completion menu open under the
-    // user's cursor.
-    if (els.input.value) render({ suggest: false });
-    if (batchResults.length) runBatch();
   } catch (err) {
-    btn.disabled = false;
+    primaryFailed = err;
+  }
+
+  await Promise.allSettled(
+    EXTRAS.map(async (src) => {
+      src.status = "loading";
+      try {
+        src.entries = await fetchSource(src.url);
+        src.status = "ok";
+        src.error = null;
+      } catch (e) {
+        src.status = "error";
+        src.error = e.message;
+      }
+    })
+  );
+
+  rebuildIndex();
+  renderSources();
+
+  btn.disabled = false;
+  if (primaryFailed) {
     btn.innerHTML = before;
     // Show the failure, then restore the status line: the old index is still
     // loaded and working, so a permanent error banner would be misleading.
     els.boot.className = "c-red";
-    els.boot.textContent = `refresh failed: ${err.message} — still using the loaded index`;
+    els.boot.textContent = `refresh failed: ${primaryFailed.message} — still using the loaded index`;
     setTimeout(() => {
       if (lastGoodStatus) setBootStatus(...lastGoodStatus);
     }, 5000);
+  } else {
+    btn.innerHTML = "✓ up to date";
+    setTimeout(() => {
+      btn.innerHTML = before;
+    }, 1800);
   }
+}
+
+async function fetchText(url) {
+  const resp = await fetch(url, { cache: "no-store" });
+  if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+  return resp.text();
+}
+
+/** Build a PRIMARY-shaped index ({colors, families}) from sheet CSV text. */
+function parseSheetCSVToPrimary(text) {
+  const entries = parseSheetCSV(text);
+  const families = [];
+  const famIndex = new Map();
+  const colors = Object.create(null);
+  for (const [key, family] of entries) {
+    if (!famIndex.has(family)) {
+      famIndex.set(family, families.length);
+      families.push(family);
+    }
+    colors[key] = famIndex.get(family);
+  }
+  return { colors, families };
 }
 
 // --- rendering --------------------------------------------------------------
@@ -698,16 +972,21 @@ function onKeyDown(e) {
   }
 }
 
+// [name, tab element key, panel element key, element to focus]
+const TAB_DEFS = [
+  ["single", "tabSingle", "panelSingle", "input"],
+  ["batch", "tabBatch", "panelBatch", "batchInput"],
+  ["sources", "tabSources", "panelSources", "sourceUrl"],
+];
+
 function switchTab(which) {
-  const single = which === "single";
-  els.tabSingle.classList.toggle("is-active", single);
-  els.tabBatch.classList.toggle("is-active", !single);
-  els.tabSingle.setAttribute("aria-selected", String(single));
-  els.tabBatch.setAttribute("aria-selected", String(!single));
-  els.panelSingle.hidden = !single;
-  els.panelBatch.hidden = single;
-  if (single) els.input.focus();
-  else els.batchInput.focus();
+  for (const [name, tabKey, panelKey, focusKey] of TAB_DEFS) {
+    const active = name === which;
+    els[tabKey].classList.toggle("is-active", active);
+    els[tabKey].setAttribute("aria-selected", String(active));
+    els[panelKey].hidden = !active;
+    if (active) els[focusKey].focus();
+  }
 }
 
 // --- init -------------------------------------------------------------------
@@ -730,8 +1009,15 @@ async function init() {
 
   els.tabSingle = document.getElementById("tab-single");
   els.tabBatch = document.getElementById("tab-batch");
+  els.tabSources = document.getElementById("tab-sources");
   els.panelSingle = document.getElementById("panel-single");
   els.panelBatch = document.getElementById("panel-batch");
+  els.panelSources = document.getElementById("panel-sources");
+
+  els.sourceList = document.getElementById("source-list");
+  els.sourceUrl = document.getElementById("source-url");
+  els.sourceAdd = document.getElementById("source-add");
+  els.sourceMsg = document.getElementById("source-msg");
 
   els.batchInput = document.getElementById("batch-input");
   els.batchRun = document.getElementById("batch-run");
@@ -742,21 +1028,28 @@ async function init() {
   els.batchNote = document.getElementById("batch-note");
 
   els.copyBtn.addEventListener("click", copyPasteLine);
-  els.refresh.addEventListener("click", refreshFromSheet);
-  els.tabSingle.addEventListener("click", () => switchTab("single"));
-  els.tabBatch.addEventListener("click", () => switchTab("batch"));
+  els.refresh.addEventListener("click", refreshAll);
 
-  // Standard tablist keyboard behaviour: arrows move between tabs.
-  for (const tab of [els.tabSingle, els.tabBatch]) {
-    tab.addEventListener("keydown", (e) => {
-      if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-        e.preventDefault();
-        const next = tab === els.tabSingle ? "batch" : "single";
-        switchTab(next);
-        (next === "single" ? els.tabSingle : els.tabBatch).focus();
-      }
+  // Tabs: click to switch, arrows cycle (standard tablist behaviour).
+  TAB_DEFS.forEach(([name, tabKey], idx) => {
+    els[tabKey].addEventListener("click", () => switchTab(name));
+    els[tabKey].addEventListener("keydown", (e) => {
+      if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+      e.preventDefault();
+      const dir = e.key === "ArrowRight" ? 1 : -1;
+      const next = TAB_DEFS[(idx + dir + TAB_DEFS.length) % TAB_DEFS.length];
+      switchTab(next[0]);
+      els[next[1]].focus();
     });
-  }
+  });
+
+  els.sourceAdd.addEventListener("click", addSource);
+  els.sourceUrl.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      addSource();
+    }
+  });
 
   els.clear.addEventListener("click", () => {
     els.input.value = "";
@@ -837,6 +1130,7 @@ async function init() {
   // "constructor" into `in` checks and property reads. Re-key onto a null
   // prototype so the index behaves like a real map.
   DATA.colors = Object.assign(Object.create(null), DATA.colors);
+  PRIMARY = { colors: DATA.colors, families: [...DATA.families] };
 
   KEYS = Object.keys(DATA.colors);
   setBootStatus(
@@ -854,6 +1148,27 @@ async function init() {
   els.input.addEventListener("input", () => render());
   els.input.addEventListener("keydown", onKeyDown);
   els.input.focus();
+
+  // Saved extra sources: show the list immediately, fetch them in the
+  // background, then fold them into the index. The built-in sheet is usable
+  // the whole time.
+  EXTRAS = loadSourceList().map((s) => ({ ...s, status: "loading" }));
+  renderSources();
+  if (EXTRAS.length > 0) {
+    await Promise.allSettled(
+      EXTRAS.map(async (src) => {
+        try {
+          src.entries = await fetchSource(src.url);
+          src.status = "ok";
+        } catch (e) {
+          src.status = "error";
+          src.error = e.message;
+        }
+      })
+    );
+    rebuildIndex();
+    renderSources();
+  }
 }
 
 document.addEventListener("DOMContentLoaded", init);

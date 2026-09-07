@@ -9,7 +9,7 @@
       name="description"
       content="Look up the customer facing color and color family for a raw vendor color."
     />
-    <link rel="stylesheet" href="styles.css?v=74add61568" />
+    <link rel="stylesheet" href="styles.css?v=50f7fb047a" />
   </head>
   <body>
     <main class="term">
@@ -62,6 +62,16 @@
             aria-controls="panel-batch"
           >
             batch
+          </button>
+          <button
+            class="tab"
+            id="tab-sources"
+            role="tab"
+            type="button"
+            aria-selected="false"
+            aria-controls="panel-sources"
+          >
+            sources
           </button>
         </div>
 
@@ -211,6 +221,46 @@
             <p class="c-dim batch-note" id="batch-note" hidden></p>
           </div>
         </section>
+
+        <!-- ---------- sources ---------- -->
+        <section
+          id="panel-sources"
+          role="tabpanel"
+          aria-labelledby="tab-sources"
+          hidden
+        >
+          <p class="c-dim cmd-hint">
+            <span class="sigil">$</span> nuorder sources
+            <span class="flag">--list</span>
+          </p>
+
+          <ul id="source-list" class="source-list"></ul>
+
+          <div class="prompt-row">
+            <span class="prompt" aria-hidden="true">+</span>
+            <input
+              id="source-url"
+              type="url"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="https://… published CSV link"
+              aria-label="Published CSV link to add as a data source"
+            />
+            <button class="btn btn-mini" id="source-add" type="button">
+              add source
+            </button>
+          </div>
+
+          <p id="source-msg" class="status" role="status" aria-live="polite"></p>
+
+          <p class="c-dim batch-note">
+            needs <span class="c-cyan">COLOR</span> and
+            <span class="c-cyan">Color Family</span> columns · Google Sheets:
+            File → Share → Publish to web → CSV · sources are saved in this
+            browser only · when the same color appears in several sources, the
+            earlier one wins (built-in sheet first)
+          </p>
+        </section>
       </div>
 
       <div class="term-status">
@@ -225,6 +275,6 @@
       <kbd>ctrl</kbd><kbd>⏎</kbd> run batch
     </p>
 
-    <script src="app.js?v=0d40f1c85c"></script>
+    <script src="app.js?v=deee221296"></script>
   </body>
 </html>
