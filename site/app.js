@@ -70,7 +70,12 @@ function pyTitle(s) {
 function getCustomerFacingColor(colorName) {
   if (typeof colorName !== "string") return "";
   const cleaned = colorName.replace(/[^a-zA-Z0-9\s]/g, "");
-  const words = cleaned.split(/\s+/).filter((w) => w.length > 0);
+  // Only color words reach the customer facing name: any token containing a
+  // digit (style codes like C001, sizes like 3m, dates like 9/23) is dropped
+  // whole. The family lookup still uses the full raw text.
+  const words = cleaned
+    .split(/\s+/)
+    .filter((w) => w.length > 0 && !/[0-9]/.test(w));
   const translated = words.map((w) => {
     const hit = DATA.translation[w.toLowerCase()];
     return hit === undefined ? w : hit;
@@ -1186,7 +1191,14 @@ async function init() {
 
   for (const btn of document.querySelectorAll("[data-copy]")) {
     btn.addEventListener("click", () => {
-      copyText(els[btn.dataset.copy].textContent, btn, "copied ✓");
+      const text = els[btn.dataset.copy].textContent;
+      if (!text) {
+        // A facing color can be empty when the input was all codes/digits.
+        // Flash instead of writing "" over whatever is on the clipboard.
+        flashBtn(btn, "nothing to copy", 1400);
+        return;
+      }
+      copyText(text, btn, "copied ✓");
     });
   }
 

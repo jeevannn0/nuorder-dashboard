@@ -53,7 +53,10 @@ def get_customer_facing_color(color_name):
     if not isinstance(color_name, str):
         return ""
     cleaned = re.sub(r"[^a-zA-Z0-9\s]", "", color_name)
-    words = cleaned.split()
+    # Only color words reach the customer facing name: any token containing a
+    # digit (style codes like C001, sizes like 3m, dates like 9/23) is dropped
+    # whole. The family lookup still uses the full raw text.
+    words = [w for w in cleaned.split() if not re.search(r"[0-9]", w)]
     translated = [translation_dict.get(w.lower(), w) for w in words]
     return " ".join(translated[:3]).title()
 

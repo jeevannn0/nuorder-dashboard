@@ -85,6 +85,14 @@ which compresses to ~530KB over the wire.
 Note that the published sheet is readable by anyone with the URL, and the
 static build bakes every color mapping into a public file.
 
+## Formatting rules
+
+The customer facing color keeps only color words: special characters are
+stripped and any token containing a digit (style codes like `C001`, sizes like
+`3m`, dates like `9/23`) is dropped whole, then the first three remaining words
+are translated and title-cased. The family lookup always uses the full raw
+text, so `RED 22` still matches its sheet row while displaying as `Red`.
+
 ## Known quirk
 
 Punctuation is stripped rather than replaced with a space, so `Bleu/Vert`
