@@ -726,6 +726,76 @@ function render(opts = {}) {
 
 // --- batch ------------------------------------------------------------------
 
+// Vocabulary for splitting concatenated color runs like "redgreenblueblack".
+// Deliberately conservative: unambiguous color words plus a few modifiers.
+// Substring-prone words (stone, sand, sky...) are excluded so real vendor
+// names like LIMESTONE or SANDSTONE are never split apart.
+const BASE_COLOR_WORDS = [
+  "red", "green", "blue", "black", "white", "grey", "gray", "yellow",
+  "orange", "pink", "purple", "brown", "beige", "navy", "teal", "cream",
+  "ivory", "gold", "silver", "maroon", "olive", "aqua", "cyan", "magenta",
+  "violet", "indigo", "turquoise", "khaki", "coral", "salmon", "mint",
+  "lavender", "charcoal", "mustard", "burgundy", "plum", "peach", "lilac",
+  "denim", "wine", "fuchsia", "emerald", "bronze", "copper", "multi", "neon",
+  "light", "dark", "deep", "pale", "bright",
+];
+
+let colorVocab = null;
+let colorVocabMaxLen = 0;
+
+function getColorVocab() {
+  if (!colorVocab) {
+    colorVocab = new Set(BASE_COLOR_WORDS);
+    for (const [from, to] of Object.entries(DATA.translation)) {
+      colorVocab.add(from);
+      colorVocab.add(to);
+    }
+    colorVocabMaxLen = Math.max(...[...colorVocab].map((w) => w.length));
+  }
+  return colorVocab;
+}
+
+/**
+ * Word-break a lowercase alphabetic run into known color words, preferring
+ * longer words, with backtracking. Returns null unless the WHOLE string is
+ * consumed, so anything with an unrecognized fragment is left untouched.
+ */
+function segmentColorRun(s) {
+  const vocab = getColorVocab();
+  const n = s.length;
+  const memo = new Array(n + 1);
+  const go = (i) => {
+    if (i === n) return [];
+    if (memo[i] !== undefined) return memo[i];
+    let out = null;
+    for (let len = Math.min(colorVocabMaxLen, n - i); len >= 3; len--) {
+      const w = s.slice(i, i + len);
+      if (vocab.has(w)) {
+        const rest = go(i + len);
+        if (rest) {
+          out = [w, ...rest];
+          break;
+        }
+      }
+    }
+    memo[i] = out;
+    return out;
+  };
+  return go(0);
+}
+
+/**
+ * If a batch line is a single concatenated run of color words, return the
+ * spaced version to process instead; otherwise null. Never touches lines
+ * with spaces or digits, or names that exist in the sheet as-is.
+ */
+function segmentIfConcatenated(raw) {
+  if (!/^[a-zA-Z]{6,}$/.test(raw)) return null;
+  if (Object.hasOwn(DATA.colors, raw.toLowerCase())) return null;
+  const words = segmentColorRun(raw.toLowerCase());
+  return words && words.length >= 2 ? words.join(" ") : null;
+}
+
 function runBatch() {
   // A multi-column Excel paste arrives as tab-separated lines; the color name
   // is the first cell. This also keeps tabs out of `raw`, which would
@@ -738,12 +808,17 @@ function runBatch() {
     .filter((l) => l.length > 0);
 
   batchResults = lines.map((raw) => {
-    const { found, family } = lookupFamily(raw);
-    return { raw, facing: getCustomerFacingColor(raw), family, found };
+    // "redgreenblueblack" is processed as "red green blue black"; the
+    // existing 3-word cap in getCustomerFacingColor then applies.
+    const split = segmentIfConcatenated(raw);
+    const effective = split ?? raw;
+    const { found, family } = lookupFamily(effective);
+    return { raw, split, facing: getCustomerFacingColor(effective), family, found };
   });
 
   const total = batchResults.length;
   const missing = batchResults.filter((r) => !r.found).length;
+  const autoSplit = batchResults.filter((r) => r.split).length;
 
   if (total === 0) {
     els.batchOut.hidden = true;
@@ -751,9 +826,10 @@ function runBatch() {
     return;
   }
 
-  els.batchStats.textContent = `${total} row${total === 1 ? "" : "s"} · ${
-    total - missing
-  } matched · ${missing} missing`;
+  els.batchStats.textContent =
+    `${total} row${total === 1 ? "" : "s"} · ${total - missing} matched · ` +
+    `${missing} missing` +
+    (autoSplit > 0 ? ` · ${autoSplit} auto-split` : "");
 
   const shown = Math.min(total, MAX_BATCH_ROWS_RENDERED);
   const frag = document.createDocumentFragment();
@@ -770,6 +846,12 @@ function runBatch() {
     const raw = document.createElement("td");
     raw.className = "raw";
     raw.textContent = r.raw;
+    if (r.split) {
+      const hint = document.createElement("span");
+      hint.className = "split-hint";
+      hint.textContent = `→ ${r.split}`;
+      raw.appendChild(hint);
+    }
 
     const facing = document.createElement("td");
     facing.className = "facing";

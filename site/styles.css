@@ -835,3 +835,10 @@ kbd,
 #source-msg {
   min-height: 1.2em;
 }
+
+/* Shown under a batch raw value when a concatenated run was auto-split. */
+.split-hint {
+  display: block;
+  color: var(--dimmer);
+  font-size: 0.78rem;
+}
