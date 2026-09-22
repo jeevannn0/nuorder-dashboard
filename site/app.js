@@ -69,10 +69,13 @@ function pyTitle(s) {
 /** Port of get_customer_facing_color() from app.py. */
 function getCustomerFacingColor(colorName) {
   if (typeof colorName !== "string") return "";
-  const cleaned = colorName.replace(/[^a-zA-Z0-9\s]/g, "");
-  // Only color words reach the customer facing name: any token containing a
-  // digit (style codes like C001, sizes like 3m, dates like 9/23) is dropped
-  // whole. The family lookup still uses the full raw text.
+  // Special characters become spaces so glued names split into real words
+  // ("Bleu/Vert" -> "Bleu Vert" -> translated "Blue Green"). Then only color
+  // words reach the customer facing name: any token still containing a digit
+  // (style codes like C001, sizes like 3m) is dropped whole, so pure number
+  // runs vanish without leaving fragments. The family lookup still uses the
+  // full raw text.
+  const cleaned = colorName.replace(/[^a-zA-Z0-9\s]/g, " ");
   const words = cleaned
     .split(/\s+/)
     .filter((w) => w.length > 0 && !/[0-9]/.test(w));

@@ -26,8 +26,9 @@ assert translation_dict is not None
 def get_customer_facing_color(color_name):
     if not isinstance(color_name, str):
         return ""
-    cleaned = re.sub(r"[^a-zA-Z0-9\s]", "", color_name)
-    # Keep in lockstep with app.py: tokens containing digits are dropped whole.
+    # Keep in lockstep with app.py: specials become spaces, then tokens
+    # containing digits are dropped whole.
+    cleaned = re.sub(r"[^a-zA-Z0-9\s]", " ", color_name)
     words = [w for w in cleaned.split() if not re.search(r"[0-9]", w)]
     translated = [translation_dict.get(w.lower(), w) for w in words]
     return " ".join(translated[:3]).title()

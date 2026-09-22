@@ -87,16 +87,10 @@ static build bakes every color mapping into a public file.
 
 ## Formatting rules
 
-The customer facing color keeps only color words: special characters are
-stripped and any token containing a digit (style codes like `C001`, sizes like
-`3m`, dates like `9/23`) is dropped whole, then the first three remaining words
-are translated and title-cased. The family lookup always uses the full raw
-text, so `RED 22` still matches its sheet row while displaying as `Red`.
-
-## Known quirk
-
-Punctuation is stripped rather than replaced with a space, so `Bleu/Vert`
-collapses to the single token `Bleuvert` and skips translation, giving
-`Bleuvert` instead of `Blue Green`. Both implementations behave identically
-here. Changing it means changing the regex in `app.py` and re-running
-`verify_parity.py`.
+The customer facing color keeps only color words. Special characters are
+converted to spaces, so glued names split into real words (`Bleu/Vert` becomes
+`Blue Green` via translation). Any token containing a digit (style codes like
+`C001`, sizes like `3m`, dates like `9/23`) is dropped whole, so numbers vanish
+without leaving fragments. The first three remaining words are then translated
+and title-cased. The family lookup always uses the full raw text, so `RED 22`
+still matches its sheet row while displaying as `Red`.
