@@ -70,15 +70,23 @@ function pyTitle(s) {
 function getCustomerFacingColor(colorName) {
   if (typeof colorName !== "string") return "";
   // Special characters become spaces so glued names split into real words
-  // ("Bleu/Vert" -> "Bleu Vert" -> translated "Blue Green"). Then only color
-  // words reach the customer facing name: any token still containing a digit
-  // (style codes like C001, sizes like 3m) is dropped whole, so pure number
-  // runs vanish without leaving fragments. The family lookup still uses the
-  // full raw text.
+  // ("Bleu/Vert" -> "Bleu Vert" -> translated "Blue Green"). Digits act as
+  // separators too: inside a token that contains digits, letter runs of 3+
+  // letters are kept as words ("red1234blue" -> "red blue") while shorter
+  // runs are treated as part of the code and dropped ("C001" -> nothing,
+  // "3m" -> nothing). The family lookup still uses the full raw text.
   const cleaned = colorName.replace(/[^a-zA-Z0-9\s]/g, " ");
-  const words = cleaned
-    .split(/\s+/)
-    .filter((w) => w.length > 0 && !/[0-9]/.test(w));
+  const words = [];
+  for (const token of cleaned.split(/\s+/)) {
+    if (token.length === 0) continue;
+    if (/[0-9]/.test(token)) {
+      for (const run of token.match(/[a-zA-Z]+/g) ?? []) {
+        if (run.length >= 3) words.push(run);
+      }
+    } else {
+      words.push(token);
+    }
+  }
   const translated = words.map((w) => {
     const hit = DATA.translation[w.toLowerCase()];
     return hit === undefined ? w : hit;

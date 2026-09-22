@@ -89,8 +89,9 @@ static build bakes every color mapping into a public file.
 
 The customer facing color keeps only color words. Special characters are
 converted to spaces, so glued names split into real words (`Bleu/Vert` becomes
-`Blue Green` via translation). Any token containing a digit (style codes like
-`C001`, sizes like `3m`, dates like `9/23`) is dropped whole, so numbers vanish
-without leaving fragments. The first three remaining words are then translated
+`Blue Green` via translation). Digits act as separators too: `red1234blue`
+becomes `Red Blue`, while letter runs shorter than three characters inside a
+digit-bearing token are treated as part of the code and dropped (`C001` and
+`3m` contribute nothing). The first three remaining words are then translated
 and title-cased. The family lookup always uses the full raw text, so `RED 22`
 still matches its sheet row while displaying as `Red`.

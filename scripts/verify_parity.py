@@ -26,10 +26,15 @@ assert translation_dict is not None
 def get_customer_facing_color(color_name):
     if not isinstance(color_name, str):
         return ""
-    # Keep in lockstep with app.py: specials become spaces, then tokens
-    # containing digits are dropped whole.
+    # Keep in lockstep with app.py: specials become spaces; in digit-bearing
+    # tokens, letter runs of 3+ letters survive, shorter runs are dropped.
     cleaned = re.sub(r"[^a-zA-Z0-9\s]", " ", color_name)
-    words = [w for w in cleaned.split() if not re.search(r"[0-9]", w)]
+    words = []
+    for token in cleaned.split():
+        if re.search(r"[0-9]", token):
+            words.extend(w for w in re.findall(r"[a-zA-Z]+", token) if len(w) >= 3)
+        else:
+            words.append(token)
     translated = [translation_dict.get(w.lower(), w) for w in words]
     return " ".join(translated[:3]).title()
 
@@ -39,6 +44,8 @@ EDGE_CASES = [
     "  spaced   out  ", "ALL-CAPS-HYPHEN", "123", "", "   ", "a", "é accented",
     "rosso/blu/verde", "MIXED case Rouge", "9/23- BO confirmed cancelled!",
     "tab\tseparated", "new\nline", "under_score", "50% COTTON", "a1b2c3",
+    # Digits as separators inside a token; short letter runs are code fragments.
+    "red1234blue", "rouge123bleu", "NAVY C001", "RED55XL", "ab1cd2red",
 ]
 
 colors = list(DATA["colors"].keys())

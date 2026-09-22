@@ -53,13 +53,18 @@ def get_customer_facing_color(color_name):
     if not isinstance(color_name, str):
         return ""
     # Special characters become spaces so glued names split into real words
-    # ("Bleu/Vert" -> "Bleu Vert" -> translated "Blue Green"). Then only color
-    # words reach the customer facing name: any token still containing a digit
-    # (style codes like C001, sizes like 3m) is dropped whole, so pure number
-    # runs vanish without leaving fragments. The family lookup still uses the
-    # full raw text.
+    # ("Bleu/Vert" -> "Bleu Vert" -> translated "Blue Green"). Digits act as
+    # separators too: inside a token that contains digits, letter runs of 3+
+    # letters are kept as words ("red1234blue" -> "red blue") while shorter
+    # runs are treated as part of the code and dropped ("C001" -> nothing,
+    # "3m" -> nothing). The family lookup still uses the full raw text.
     cleaned = re.sub(r"[^a-zA-Z0-9\s]", " ", color_name)
-    words = [w for w in cleaned.split() if not re.search(r"[0-9]", w)]
+    words = []
+    for token in cleaned.split():
+        if re.search(r"[0-9]", token):
+            words.extend(w for w in re.findall(r"[a-zA-Z]+", token) if len(w) >= 3)
+        else:
+            words.append(token)
     translated = [translation_dict.get(w.lower(), w) for w in words]
     return " ".join(translated[:3]).title()
 
